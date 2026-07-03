@@ -1,0 +1,61 @@
+{
+  "name": "@lineageos-infra/libamlburn",
+  "version": "0.1.0",
+  "description": "WebUSB library for communicating with Amlogic devices in USB boot mode",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "scripts": {
+    "build": "tsdown",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "type-check": "tsc",
+    "test": "vitest run",
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lineageos-infra/libamlburn.git"
+  },
+  "keywords": [
+    "amlogic",
+    "aml",
+    "burn",
+    "optimus",
+    "pyamlboot",
+    "webusb"
+  ],
+  "files": [
+    "/dist"
+  ],
+  "homepage": "https://github.com/lineageos-infra/libamlburn",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
+    "@types/node": "^26.1.0",
+    "@types/w3c-web-usb": "^1.0.14",
+    "@vitest/coverage-v8": "^4.1.9",
+    "@vue/eslint-config-prettier": "^10.2.0",
+    "@vue/eslint-config-typescript": "^14.9.0",
+    "eslint": "^10.6.0",
+    "eslint-plugin-vue": "^10.9.2",
+    "husky": "^9.1.7",
+    "prettier": "^3.9.4",
+    "tsdown": "^0.22.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.1",
+    "vitest": "^4.1.9"
+  }
+}

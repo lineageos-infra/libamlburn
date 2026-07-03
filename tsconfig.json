@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "types": ["w3c-web-usb", "node"],
+
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "strict": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true
+  },
+  "include": ["src", "tests", "tsdown.config.ts"]
+}
