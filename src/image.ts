@@ -26,7 +26,7 @@ export function crc32(data: Uint8Array, seed = 0): number {
 /** verifyCrc reads the package in slices this large rather than all at once */
 const CRC_CHUNK_SIZE = 4 * 1024 * 1024
 
-const ITEM_SIZE = { 1: 0x90, 2: 0x240 } as const
+const ITEM_SIZE = { 1: 0x80, 2: 0x240 } as const
 const TYPE_FIELD_SIZE = { 1: 32, 2: 256 } as const
 
 const FILE_TYPES: Record<number, string> = {

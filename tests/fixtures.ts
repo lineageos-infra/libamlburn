@@ -10,7 +10,7 @@ export type FixtureItem = {
 
 /** Assemble a minimal but structurally correct Amlogic upgrade package. */
 export function buildImage(version: 1 | 2, items: FixtureItem[], corruptCrc = false) {
-  const itemSize = version === 1 ? 0x90 : 0x240
+  const itemSize = version === 1 ? 0x80 : 0x240
   const typeSize = version === 1 ? 32 : 256
   const headerSize = 64
 

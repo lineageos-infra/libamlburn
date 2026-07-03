@@ -1,3 +1,4 @@
+import { openAsBlob } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { AmlImageError } from '../src/errors'
 import { AmlImage, crc32 } from '../src/image'
@@ -89,6 +90,44 @@ describe.each([1, 2] as const)('AmlImage v%i', (version) => {
   test('accepts a Blob source', async () => {
     const image = await AmlImage.open(new Blob([buildImage(version, FIXTURE_ITEMS)]))
     expect(image.itemCount()).toBe(4)
+  })
+})
+
+// a real v1 install package, as produced by aml_image_v2_packer (128-byte
+// v1 item entries; a 0x90 stride mis-parses entry 3's strings as offsets)
+describe('AmlImage real install package', () => {
+  const open = async (options?: { verifyCrc?: boolean }) =>
+    AmlImage.open(await openAsBlob(new URL('./aml_install_package.img', import.meta.url)), options)
+
+  test('parses the item table', async () => {
+    const image = await open()
+
+    expect(image.version).toBe(1)
+    expect(image.itemCount()).toBe(15)
+    expect(image.itemCount('PARTITION')).toBe(9)
+
+    const platform = image.itemRequire('conf', 'platform')
+    expect((await platform.text()).startsWith('Platform:')).toBe(true)
+
+    const boot = image.itemRequire('PARTITION', 'boot')
+    expect(boot.fileType).toBe('normal')
+    expect(boot.size).toBe(16777216)
+
+    // the bootloader partition shares its bytes with the USB:DDR boot item
+    const ddr = image.itemRequire('USB', 'DDR')
+    const bootloader = image.itemRequire('PARTITION', 'bootloader')
+    expect(bootloader.size).toBe(ddr.size)
+    expect([...(await bootloader.read(0, 16))]).toEqual([...(await ddr.read(0, 16))])
+  })
+
+  test('the last item ends exactly at the end of the package', async () => {
+    const image = await open()
+    const misc = image.itemRequire('PARTITION', 'misc')
+    expect((await misc.read(0, misc.size)).length).toBe(misc.size)
+  })
+
+  test('verifies the crc', async () => {
+    await expect(open({ verifyCrc: true })).resolves.toBeInstanceOf(AmlImage)
   })
 })
 
