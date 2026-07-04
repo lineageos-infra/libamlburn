@@ -429,6 +429,8 @@ export class Device {
    * @param options.vars limit the export to these variables
    * @param options.address scratch RAM the env is exported to; the default is
    * the classic meson kernel load address, unused in burn mode
+   * @param options.size how many bytes to read back; the text is NUL-trimmed,
+   * but an env larger than this comes back truncated
    */
   async readEnv(options?: {
     vars?: string[]
@@ -436,10 +438,10 @@ export class Device {
     size?: number
     timeout?: number
   }): Promise<string> {
-    const { vars = [], address = 0x1080000, size = 0x2000, timeout } = options ?? {}
+    const { vars = [], address = 0x1080000, size = 0xf000, timeout } = options ?? {}
     const hexAddr = `0x${address.toString(16)}`
     const args = vars.length ? ` ${vars.join(' ')}` : ''
-    await this.checkBulkCmd(`env export -t -s 0x${size.toString(16)} ${hexAddr}${args}`, {
+    await this.checkBulkCmd(`env export -t ${hexAddr}${args}`, {
       ...(timeout !== undefined ? { timeout } : {})
     })
     await this.checkBulkCmd(`upload mem ${hexAddr} normal 0x${size.toString(16)}`, {
@@ -639,7 +641,7 @@ export class Device {
 
       await this.writeAMLCData(seq, request.offset, data)
       seq += 1
-      transferred += data.length
+      transferred = Math.max(transferred, request.offset + data.length)
       options?.onProgress?.({ bytesTransferred: transferred, totalBytes: blob.size })
     }
   }

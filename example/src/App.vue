@@ -2,6 +2,7 @@
 import {
   AmlImage,
   flashImage,
+  reacquireDevice,
   requestDevice,
   WipeMode,
   type BurnProgress,
@@ -28,6 +29,8 @@ const rebootAfter = ref(true)
 const flashing = ref(false)
 const burnProgress = ref<BurnProgress>()
 const flashError = ref('')
+const reconnectNeeded = ref(false)
+let resolveReconnect: ((device: Device) => void) | undefined
 
 const progressPercent = computed(() => {
   const p = burnProgress.value
@@ -98,6 +101,43 @@ async function stageImageFile(event: Event) {
   }
 }
 
+/**
+ * The device re-enumerates mid-flash, and U-Boot's gadget has no serial
+ * number, so the browser usually forgets the WebUSB grant: try silently first,
+ * then ask the user to re-pick the device (requestDevice needs a click).
+ */
+async function reacquire(): Promise<Device> {
+  try {
+    return await reacquireDevice(3000, {
+      logging: verboseLogging.value,
+      timeout: defaultTimeout.value
+    })
+  } catch {
+    reconnectNeeded.value = true
+    try {
+      return await new Promise<Device>((resolve) => {
+        resolveReconnect = resolve
+      })
+    } finally {
+      reconnectNeeded.value = false
+      resolveReconnect = undefined
+    }
+  }
+}
+
+async function reconnectDevice() {
+  try {
+    const device = await requestDevice({
+      logging: verboseLogging.value,
+      timeout: defaultTimeout.value
+    })
+    await device.initialize()
+    resolveReconnect?.(device)
+  } catch {
+    // picker dismissed; keep the button so the user can retry
+  }
+}
+
 async function flash() {
   const device = connectedDevice.value
   if (!device || !image.value) return
@@ -110,6 +150,7 @@ async function flash() {
     const finished = await flashImage(device, image.value, {
       wipe: wipe.value,
       reboot: rebootAfter.value,
+      reacquire,
       onProgress: (p) => {
         // progress fires per 64 KiB block; rendering every event thrashes the UI
         const now = Date.now()
@@ -199,6 +240,11 @@ async function flash() {
       </div>
 
       <image-items v-if="image" :image="image" />
+
+      <div v-if="reconnectNeeded" class="reconnect">
+        <span>The device reconnected as a new USB device and must be re-selected.</span>
+        <button @click="reconnectDevice">Re-select device</button>
+      </div>
 
       <div v-if="burnProgress" class="progress">
         <span>
@@ -343,5 +389,15 @@ fieldset {
 .error {
   color: light-dark(#b91c1c, #f87171);
   margin: 0.5rem 0 0;
+}
+
+.reconnect {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid light-dark(#b45309, #f59e0b);
+  border-radius: 0.375rem;
 }
 </style>

@@ -17,6 +17,7 @@ export { consoleLogger, type Logger, type LogLevel } from './logger'
 export {
   flashImage,
   parsePlatformConfig,
+  reacquireDevice,
   WipeMode,
   type BurnProgress,
   type BurnStage,

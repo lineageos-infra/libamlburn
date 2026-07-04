@@ -1,3 +1,4 @@
+import { openAsBlob } from 'node:fs'
 import { describe, expect, test, vi } from 'vitest'
 import { Request } from '../../src/constants'
 import { Device } from '../../src/device'
@@ -265,6 +266,72 @@ describe('flashImage from the BootROM (IPL -> SPL -> AMLC -> reacquire)', () => 
       'burn_complete 3'
     ])
   })
+})
+
+describe('flashImage with the real install package (TPL start)', () => {
+  test('streams every partition with the sizes from the item table', async () => {
+    const image = await AmlImage.open(
+      await openAsBlob(new URL('../aml_install_package.img', import.meta.url))
+    )
+    const flashed = image
+      .items()
+      .filter((item) => item.mainType === 'PARTITION' || item.mainType === 'dtb')
+
+    const bulkReplies: (string | Uint8Array<ArrayBuffer>)[] = [
+      'success', //     low_power (erase-bootloader step)
+      'failed', //      bootloader_is_old -> "new", skip erase
+      'success', //     upload mem (secure check)
+      new Uint8Array([0, 0, 0, 0]), // encrypt reg value -> not secure
+      'success', //     low_power
+      'success' //      disk_initial
+    ]
+    for (const item of flashed) {
+      for (let i = 0; i < Math.ceil(item.size / 0x10000); i++) {
+        bulkReplies.push(asciiBytes('OK!!', 0x200))
+      }
+      bulkReplies.push('success') // download get_status
+    }
+    bulkReplies.push('success', 'success') // save_setting, burn_complete
+
+    const fake = createBurnTransport({ identifies: [TPL], bulkReplies })
+    const progress: BurnProgress[] = []
+    const device = new Device(fake.transport, { timeout: 100 })
+    await flashImage(device, image, {
+      timings: ZERO_TIMINGS,
+      onProgress: (p) => progress.push(p)
+    })
+
+    expect(fake.commands).toEqual([
+      '    echo 1234',
+      '    low_power',
+      'bootloader_is_old',
+      'upload mem 0xff800228 normal 0x4',
+      '    low_power',
+      'disk_initial 0',
+      ...flashed.flatMap((item) => [
+        item.mainType === 'dtb'
+          ? `download mem dtb normal ${item.size}`
+          : `download store ${item.subType} normal ${item.size}`,
+        'download get_status'
+      ]),
+      'save_setting',
+      'burn_complete 3'
+    ])
+    // a mis-sized item table (the 0x90 v1 stride bug) garbles these
+    expect(fake.commands).toContain('download mem dtb normal 75848')
+    expect(fake.commands).toContain('download store boot normal 16777216')
+    expect(fake.commands).toContain('download store bootloader normal 1261424')
+
+    // every partition byte went over the bulk endpoint
+    const streamed = fake.bulkSent.reduce((sum, block) => sum + block.length, 0)
+    expect(streamed).toBe(flashed.reduce((sum, item) => sum + item.size, 0))
+
+    for (const p of progress) {
+      if (p.bytesTransferred !== undefined && p.totalBytes !== undefined) {
+        expect(p.bytesTransferred).toBeLessThanOrEqual(p.totalBytes)
+      }
+    }
+  }, 30_000)
 })
 
 describe('flashImage password handling', () => {

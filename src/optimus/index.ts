@@ -1,5 +1,6 @@
 export {
   flashImage,
+  reacquireDevice,
   WipeMode,
   type BurnProgress,
   type BurnStage,

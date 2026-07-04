@@ -1,5 +1,5 @@
 import { PRODUCT_GX_CHIP, VENDOR_AMLOGIC } from '../constants'
-import { Device } from '../device'
+import { Device, DeviceOptions } from '../device'
 import { AmlImageError, AmlUsbError, BulkCmdError, PasswordError } from '../errors'
 import { AmlImage, AmlImageItem } from '../image'
 import { DeviceInfo } from '../info'
@@ -429,7 +429,17 @@ async function closeQuietly(device: Device) {
   }
 }
 
-async function defaultReacquire(timeout: number): Promise<Device> {
+/**
+ * Poll `navigator.usb.getDevices()` until the re-enumerated device answers
+ * identify(). U-Boot's burn-mode gadget reports the same 1b8e:c003 IDs as the
+ * BootROM but carries no serial number, so browsers may not persist the WebUSB
+ * grant across the re-enumeration — when this times out, prompt the user again
+ * with requestDevice() (which needs a user gesture) and pass the result on.
+ */
+export async function reacquireDevice(
+  timeout = 10_000,
+  options?: Partial<DeviceOptions>
+): Promise<Device> {
   if (typeof navigator === 'undefined' || !navigator.usb) {
     throw new AmlUsbError('cannot reacquire the device: WebUSB is unavailable')
   }
@@ -441,7 +451,7 @@ async function defaultReacquire(timeout: number): Promise<Device> {
       (d) => d.vendorId === VENDOR_AMLOGIC && d.productId === PRODUCT_GX_CHIP
     )
     if (usbDevice) {
-      const device = new Device(usbDevice)
+      const device = new Device(usbDevice, options)
       try {
         await device.initialize()
         await device.identify()
@@ -476,7 +486,9 @@ export async function flashImage(
 
   const ctx: BurnContext = { device, image, platform, secure: false, timings, options }
   const reacquire = async () => {
-    ctx.device = await (options.reacquire ?? (() => defaultReacquire(timings.reacquireTimeout)))()
+    ctx.device = await (
+      options.reacquire ?? (() => reacquireDevice(timings.reacquireTimeout, device.deviceOptions))
+    )()
     await delay(timings.stepDelay)
   }
 

@@ -327,18 +327,20 @@ describe('bulk commands', () => {
     const exportedCmd = new TextDecoder().decode(
       controlsOut[0]!.data!.subarray(0, controlsOut[0]!.data!.length - 1)
     )
-    expect(exportedCmd).toBe('env export -t -s 0x2000 0x1080000')
+    // no -s bound: with one, env export fails outright ('Env export buffer
+    // too small') as soon as the env outgrows it
+    expect(exportedCmd).toBe('env export -t 0x1080000')
 
     expect(controlsOut[1]!.request).toBe(Request.BULKCMD)
     const uploadCmd = new TextDecoder().decode(
       controlsOut[1]!.data!.subarray(0, controlsOut[1]!.data!.length - 1)
     )
-    expect(uploadCmd).toBe('upload mem 0x1080000 normal 0x2000')
+    expect(uploadCmd).toBe('upload mem 0x1080000 normal 0xf000')
 
     expect(controlsIn[0]).toEqual({
       request: Request.READ_MEDIA,
-      value: 0x2000,
-      index: 2,
+      value: 0xf000,
+      index: 15,
       length: 16
     })
     expect(envStr).toBe('bootcmd=run storeboot\nbootdelay=1')
@@ -361,7 +363,7 @@ describe('bulk commands', () => {
     const exportedCmd = new TextDecoder().decode(
       controlsOut[0]!.data!.subarray(0, controlsOut[0]!.data!.length - 1)
     )
-    expect(exportedCmd).toBe('env export -t -s 0x1000 0x2000000 bootcmd bootdelay')
+    expect(exportedCmd).toBe('env export -t 0x2000000 bootcmd bootdelay')
 
     const uploadCmd = new TextDecoder().decode(
       controlsOut[1]!.data!.subarray(0, controlsOut[1]!.data!.length - 1)
@@ -546,6 +548,27 @@ describe('AMLC', () => {
     expect(bulkSent).toHaveLength(7)
     expect(progress).toEqual([0x200, 0x400])
     expect(bulkSent[1]).toEqual(image.slice(0, 0x200))
+  })
+
+  test('bootAMLC progress never exceeds the image size on re-requested regions', async () => {
+    const { device, bulkInQueue } = createDevice()
+    const image = new Uint8Array(0x400).fill(0xaa)
+
+    bulkInQueue.push(
+      amlcRequest(0x200, 0), // first 512 bytes
+      ascii('OKAY', 16),
+      ascii('OKAY', 16),
+      amlcRequest(0x400, 0), // BL2 re-reads from the start, overlapping the first request
+      ascii('OKAY', 16),
+      ascii('OKAY', 16),
+      amlcRequest(0x400, 0) // repeated -> done
+    )
+
+    const progress: number[] = []
+    await device.bootAMLC(image, { onProgress: (p) => progress.push(p.bytesTransferred) })
+
+    // summing chunk lengths would report 0x600 of 0x400 (150%)
+    expect(progress).toEqual([0x200, 0x400])
   })
 
   test('bootAMLC throws when the image runs out', async () => {
