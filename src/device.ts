@@ -107,7 +107,11 @@ export class Device {
   }
 
   async close() {
-    await this.transport.close(this.deviceOptions.timeout)
+    try {
+      await this.transport.close(this.deviceOptions.timeout)
+    } catch (error) {
+      throw new AmlUsbError('Unable to close device', { cause: error })
+    }
   }
 
   onDisconnect(callback: () => void) {
@@ -522,6 +526,7 @@ export class Device {
     } = options ?? {}
 
     let retryTimes = 0
+    let lastError: unknown
     for (;;) {
       let received: Uint8Array | undefined
       try {
@@ -534,6 +539,7 @@ export class Device {
           `media write ack timed out at block ${seq}`
         )
       } catch (error) {
+        lastError = error
         this._log('debug', error)
       }
 
@@ -543,7 +549,7 @@ export class Device {
 
       retryTimes += 1
       if (retryTimes > resendTimes) {
-        throw new MediaWriteError(seq, retryTimes)
+        throw new MediaWriteError(seq, retryTimes, { cause: lastError })
       }
       await delay(resendDelay)
     }

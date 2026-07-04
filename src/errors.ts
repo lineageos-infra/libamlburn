@@ -30,9 +30,10 @@ export class TplCmdError extends CommandError {
 export class MediaWriteError extends AmlUsbError {
   constructor(
     readonly seq: number,
-    readonly attempts: number
+    readonly attempts: number,
+    options?: ErrorOptions
   ) {
-    super(`media write failed at block ${seq} after ${attempts} attempts`)
+    super(`media write failed at block ${seq} after ${attempts} attempts`, options)
   }
 }
 

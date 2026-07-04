@@ -77,6 +77,12 @@ SomeFutureKey:42
     ).toThrow(AmlUsbError)
   })
 
+  test('throws on a key with an empty value rather than defaulting it to 0', () => {
+    expect(() =>
+      parsePlatformConfig('Platform:\nDDRLoad:0\nDDRRun:0\nControl0=0:0\nControl1=0:0')
+    ).toThrow(AmlUsbError)
+  })
+
   test('throws on a ControlN entry without a value', () => {
     expect(() => parsePlatformConfig('Control0=0xc110419c')).toThrow(/invalid Control0= entry/)
   })

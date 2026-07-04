@@ -41,7 +41,7 @@ export const AMLC_MAX_TRANSFER_LENGTH = 65536
 
 export const BULK_REPLY_LEN = 512
 export const TPL_STAT_LEN = 0x40
-/** Commands longer than this confuse U-Boot's USB function (NUL terminator included) */
+/** A command's NUL-terminated length must stay under this (U-Boot's USB buffer) */
 export const MAX_COMMAND_LENGTH = 128
 
 export const WRITE_MEDIA_BLOCK_SIZE = 0x10000

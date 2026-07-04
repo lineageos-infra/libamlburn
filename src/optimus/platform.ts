@@ -53,9 +53,11 @@ const INT_FIELDS: IntField[] = [
 ]
 
 function parseNumber(text: string): number {
-  const value = Number(text.trim())
-  if (!Number.isFinite(value)) {
-    throw new AmlUsbError(`invalid number '${text.trim()}' in platform config`)
+  const trimmed = text.trim()
+  const value = Number(trimmed)
+  // Number('') is 0, which would silently pass a truncated key
+  if (trimmed === '' || !Number.isFinite(value)) {
+    throw new AmlUsbError(`invalid number '${trimmed}' in platform config`)
   }
   return value
 }

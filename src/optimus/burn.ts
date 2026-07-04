@@ -264,7 +264,7 @@ async function downloadFile(ctx: BurnContext, item: AmlImageItem, address: numbe
   let written = 0
 
   while (written < total) {
-    const buf = await item.read(written, Math.min(blockLength, item.size - written))
+    const buf = await item.read(written, Math.min(blockLength, total - written))
     if (buf.length === 0) break
     await ctx.device.writeLargeMemory(address + written, buf, { blockLength: buf.length })
     written += buf.length

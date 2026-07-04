@@ -302,6 +302,56 @@ describe('flashImage from the BootROM (IPL -> SPL -> AMLC -> reacquire)', () => 
   })
 })
 
+describe('downloadFile respects a size limit smaller than the item', () => {
+  test('streams exactly DDRSize bytes when it is unaligned to the block length', async () => {
+    // 0x8300 isn't a multiple of the 0x1000 block length, so the last chunk
+    // must clamp to the remaining budget
+    const ddrConf = PLATFORM_CONF.replace('DDRSize:0', 'DDRSize:0x8300')
+    const bigImage = await AmlImage.open(
+      buildImage(2, [
+        { mainType: 'conf', subType: 'platform', payload: asciiBytes(ddrConf) },
+        { mainType: 'USB', subType: 'DDR', payload: new Uint8Array(0x9500).fill(0xdd) },
+        { mainType: 'USB', subType: 'UBOOT', payload: new Uint8Array(0x400).fill(0xbb) },
+        { mainType: 'PARTITION', subType: 'boot', payload: new Uint8Array(8).fill(1) }
+      ])
+    )
+
+    const romFake = createBurnTransport({
+      identifies: [IPL, IPL, IPL, IPL, IPL, IPL, SPL_AMLC, SPL_AMLC],
+      readMemReplies: [new Uint8Array([0, 0, 0, 0])],
+      bulkReplies: [
+        amlcRequest(0x200, 0),
+        asciiBytes('OKAY', 16),
+        asciiBytes('OKAY', 16),
+        amlcRequest(0x200, 0)
+      ]
+    })
+    const tplFake = createBurnTransport({
+      identifies: [TPL],
+      bulkReplies: [
+        'success',
+        'success',
+        asciiBytes('OK!!', 0x200),
+        'success',
+        'success',
+        'success'
+      ]
+    })
+
+    const romDevice = new Device(romFake.transport, { timeout: 100 })
+    const tplDevice = new Device(tplFake.transport, { timeout: 100 })
+    const reacquire = vi.fn().mockResolvedValue(tplDevice)
+
+    await flashImage(romDevice, bigImage, { timings: ZERO_TIMINGS, reacquire })
+
+    // DDR bytes are 0xdd, U-Boot (AMLC) 0xbb
+    const ddrStreamed = romFake.bulkSent
+      .filter((b) => b.length > 0 && b.every((x) => x === 0xdd))
+      .reduce((sum, b) => sum + b.length, 0)
+    expect(ddrStreamed).toBe(0x8300)
+  })
+})
+
 describe('flashImage with the real install package (TPL start)', () => {
   test('streams every partition with the sizes from the item table', async () => {
     const image = await AmlImage.open(

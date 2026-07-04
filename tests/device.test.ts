@@ -492,6 +492,20 @@ describe('media writes', () => {
     expect(new DataView(controlsOut[1]!.data!.buffer).getUint32(0, true)).toBe(1)
   })
 
+  test('writeMediaStream attaches the transport error as the MediaWriteError cause', async () => {
+    const fake = createFakeTransport()
+    const boom = new Error('device dropped off the bus')
+    fake.transport.bulkOut = () => Promise.reject(boom)
+    const device = new Device(fake.transport, { timeout: 100 })
+
+    const error: unknown = await device
+      .writeMediaStream(new Uint8Array(64), { resendTimes: 0, resendDelay: 0 })
+      .catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(MediaWriteError)
+    expect((error as MediaWriteError).cause).toBe(boom)
+  })
+
   test('writeMediaStream logs a failed block write and resends it', async () => {
     const fake = createFakeTransport()
     const logger = vi.fn()
@@ -685,6 +699,18 @@ describe('connection lifecycle', () => {
 
     expect(error).toBeInstanceOf(AmlUsbError)
     expect(((error as AmlUsbError).cause as Error).message).toBe('boom')
+  })
+
+  test('close wraps a transport failure in AmlUsbError with the cause', async () => {
+    const fake = createFakeTransport()
+    const boom = new Error('device already gone')
+    fake.transport.close = () => Promise.reject(boom)
+    const device = new Device(fake.transport, { timeout: 100 })
+
+    const error: unknown = await device.close().catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(AmlUsbError)
+    expect((error as AmlUsbError).cause).toBe(boom)
   })
 
   test('onDisconnect forwards the callback to the transport', () => {
