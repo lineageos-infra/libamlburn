@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { Request } from '../src/constants'
 import { Device } from '../src/device'
 import { AmlcError, AmlUsbError, BulkCmdError, MediaWriteError, TplCmdError } from '../src/errors'
@@ -749,25 +749,32 @@ describe('misc primitives', () => {
 })
 
 describe('waitForIdentify', () => {
+  afterEach(() => vi.useRealTimers())
+
   test('polls until identify succeeds', async () => {
+    vi.useFakeTimers()
     const { device, controlInQueue } = createDevice()
 
     // the first poll finds nothing queued and retries after its 200 ms pause
     const pending = device.waitForIdentify(2000)
     controlInQueue.push(new Uint8Array([0, 9, 0, 16, 0, 0, 0, 0]))
+    await vi.advanceTimersByTimeAsync(200)
 
     await expect(pending).resolves.toHaveProperty('stageName', 'TPL')
   })
 
   test('rejects after the timeout and stops polling', async () => {
+    vi.useFakeTimers()
     const { device, controlsIn } = createDevice()
 
-    await expect(device.waitForIdentify(20)).rejects.toThrow(
+    const assertion = expect(device.waitForIdentify(20)).rejects.toThrow(
       /timed out waiting for the device to identify/
     )
+    await vi.advanceTimersByTimeAsync(20)
+    await assertion
 
     // the abandoned loop makes at most one more attempt, then stops
-    await new Promise((resolve) => setTimeout(resolve, 450))
+    await vi.advanceTimersByTimeAsync(450)
     expect(controlsIn.length).toBeLessThanOrEqual(2)
   })
 })

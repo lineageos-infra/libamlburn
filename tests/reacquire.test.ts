@@ -45,6 +45,7 @@ function stubUsb(devices: USBDevice[]) {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('reacquireDevice', () => {
@@ -62,21 +63,32 @@ describe('reacquireDevice', () => {
   })
 
   test('throws ReacquireNeededError when the grant was dropped (no candidate ever appears)', async () => {
+    vi.useFakeTimers()
     stubUsb([])
-    await expect(reacquireDevice(300)).rejects.toThrow(ReacquireNeededError)
+
+    const assertion = expect(reacquireDevice(300)).rejects.toThrow(ReacquireNeededError)
+    await vi.advanceTimersByTimeAsync(400)
+    await assertion
   })
 
   test('other Amlogic product ids do not count as candidates', async () => {
+    vi.useFakeTimers()
     stubUsb([fakeUsbDevice({ productId: 0xc004 })]) // ADNL protocol device
-    await expect(reacquireDevice(300)).rejects.toThrow(ReacquireNeededError)
+
+    const assertion = expect(reacquireDevice(300)).rejects.toThrow(ReacquireNeededError)
+    await vi.advanceTimersByTimeAsync(400)
+    await assertion
   })
 
   test('an unresponsive candidate times out without ReacquireNeededError', async () => {
+    vi.useFakeTimers()
     stubUsb([fakeUsbDevice({ identifies: false })])
 
     const result = reacquireDevice(300, { timeout: 50 })
+    const assertion = expect(result).rejects.toThrow(AmlUsbError)
+    await vi.advanceTimersByTimeAsync(400)
 
-    await expect(result).rejects.toThrow(AmlUsbError)
+    await assertion
     await expect(result).rejects.not.toThrow(ReacquireNeededError)
     await expect(result).rejects.toThrow(/timed out waiting for the device to re-enumerate/)
   })
