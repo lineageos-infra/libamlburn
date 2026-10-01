@@ -1,10 +1,2 @@
-export {
-  flashImage,
-  reacquireDevice,
-  WipeMode,
-  type BurnProgress,
-  type BurnStage,
-  type BurnTimings,
-  type FlashOptions
-} from './burn'
+export { OptimusDevice } from './device'
 export { parsePlatformConfig, type Platform } from './platform'

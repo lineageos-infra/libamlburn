@@ -3,10 +3,11 @@ import { timeoutPromise } from './utils/timeout'
 const USB_CLASS_VENDOR_SPECIFIC = 0xff
 
 /**
- * The USB surface the protocol driver runs on. The legacy Amlogic boot
+ * The USB surface the protocol drivers run on. The legacy Amlogic boot
  * protocol needs vendor control transfers in both directions plus a bulk
  * endpoint pair, so — unlike Odin — it cannot be carried over Web Serial.
- * The interface exists as the seam for fake transports in tests.
+ * ADNL uses the bulk pair alone. The interface exists as the seam for fake
+ * transports in tests.
  */
 export interface UsbTransport {
   connect(timeout: number): Promise<void>
@@ -59,39 +60,30 @@ export class WebUsbTransport implements UsbTransport {
       throw new Error('Unable to select the proper configuration')
     }
 
-    let interfaceNum = -1
-    let altInterfaceNum = -1
-
-    for (const usbInterface of this.device.configuration.interfaces) {
-      for (const altInterface of usbInterface.alternates) {
-        const outEndpoint =
-          altInterface.endpoints.find((endpoint) => endpoint.direction === 'out')?.endpointNumber ??
-          -1
-        const inEndpoint =
-          altInterface.endpoints.find((endpoint) => endpoint.direction === 'in')?.endpointNumber ??
-          -1
-
-        if (
-          altInterface.interfaceClass === USB_CLASS_VENDOR_SPECIFIC &&
-          outEndpoint !== -1 &&
-          inEndpoint !== -1
-        ) {
-          altInterfaceNum = altInterface.alternateSetting
-          this.outEndpointNum = outEndpoint
-          this.inEndpointNum = inEndpoint
-          break
-        }
-      }
-
-      if (altInterfaceNum !== -1) {
-        interfaceNum = usbInterface.interfaceNumber
-        break
-      }
-    }
-
-    if (this.outEndpointNum === -1 || this.inEndpointNum === -1) {
+    const candidates = this.device.configuration.interfaces.flatMap((usbInterface) =>
+      usbInterface.alternates.flatMap((altInterface) => {
+        const outEndpoint = altInterface.endpoints.find((e) => e.direction === 'out')
+        const inEndpoint = altInterface.endpoints.find((e) => e.direction === 'in')
+        if (!outEndpoint || !inEndpoint) return []
+        return [
+          {
+            interfaceNum: usbInterface.interfaceNumber,
+            altInterfaceNum: altInterface.alternateSetting,
+            outEndpointNum: outEndpoint.endpointNumber,
+            inEndpointNum: inEndpoint.endpointNumber,
+            vendorSpecific: altInterface.interfaceClass === USB_CLASS_VENDOR_SPECIFIC
+          }
+        ]
+      })
+    )
+    // pyamlboot's ADNL path takes the first interface whatever its class
+    const chosen = candidates.find((c) => c.vendorSpecific) ?? candidates[0]
+    if (!chosen) {
       throw new Error('Unable to locate the bulk endpoints')
     }
+    const { interfaceNum, altInterfaceNum } = chosen
+    this.outEndpointNum = chosen.outEndpointNum
+    this.inEndpointNum = chosen.inEndpointNum
 
     await timeoutPromise(
       this.device.claimInterface(interfaceNum),

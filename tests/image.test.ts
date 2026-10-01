@@ -167,3 +167,16 @@ describe('AmlImage error handling', () => {
     await expect(AmlImage.open(image)).rejects.toThrow(/MAX_SAFE_INTEGER/)
   })
 })
+
+describe('AmlImage file types', () => {
+  test('names unknown file types by hex and filters by file type', async () => {
+    const image = await AmlImage.open(
+      buildImage(2, [
+        { mainType: 'PARTITION', subType: 'a', fileType: 0x1fe, payload: new Uint8Array(4) },
+        { mainType: 'PARTITION', subType: 'b', fileType: 0x3fe, payload: new Uint8Array(4) }
+      ])
+    )
+    expect(image.items().map((item) => item.fileType)).toEqual(['ubi', '0x3fe'])
+    expect(image.items({ fileType: 'ubi' }).map((item) => item.subType)).toEqual(['a'])
+  })
+})

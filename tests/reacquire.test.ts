@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { AmlUsbError, ReacquireNeededError } from '../src/errors'
-import { reacquireDevice } from '../src/optimus'
+import { reacquireDevice } from '../src/flash'
 
 function fakeUsbDevice(options?: { identifies?: boolean; productId?: number }): USBDevice {
   const { identifies = true, productId = 0xc003 } = options ?? {}
@@ -33,7 +33,13 @@ function fakeUsbDevice(options?: { identifies?: boolean; productId?: number }): 
           status: 'ok',
           data: new DataView(new Uint8Array([0, 9, 0, 16, 0, 0, 0, 0]).buffer)
         })
-      : vi.fn().mockRejectedValue(new Error('stall'))
+      : vi.fn().mockRejectedValue(new Error('stall')),
+    // ADNL identify: OKAY + protocol 5, stage U-Boot
+    transferOut: vi.fn().mockResolvedValue({ status: 'ok', bytesWritten: 15 }),
+    transferIn: vi.fn().mockResolvedValue({
+      status: 'ok',
+      data: new DataView(new Uint8Array([0x4f, 0x4b, 0x41, 0x59, 5, 0, 0, 16]).buffer)
+    })
   } as unknown as USBDevice
 }
 
@@ -71,9 +77,17 @@ describe('reacquireDevice', () => {
     await assertion
   })
 
-  test('other Amlogic product ids do not count as candidates', async () => {
+  test('reacquires an ADNL device as an AdnlDevice', async () => {
+    stubUsb([fakeUsbDevice({ productId: 0xc004 })])
+
+    const device = await reacquireDevice(1000, { timeout: 100 })
+
+    expect(device.protocol).toBe('adnl')
+  })
+
+  test('non-burn-mode product ids do not count as candidates', async () => {
     vi.useFakeTimers()
-    stubUsb([fakeUsbDevice({ productId: 0xc004 })]) // ADNL protocol device
+    stubUsb([fakeUsbDevice({ productId: 0xc005 })])
 
     const assertion = expect(reacquireDevice(300)).rejects.toThrow(ReacquireNeededError)
     await vi.advanceTimersByTimeAsync(400)
