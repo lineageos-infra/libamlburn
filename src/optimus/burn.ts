@@ -1,110 +1,28 @@
-import { PRODUCT_GX_CHIP, VENDOR_AMLOGIC } from '../constants'
-import { Device, DeviceOptions } from '../device'
+import { AmlImageError, AmlUsbError, BulkCmdError, PasswordError } from '../errors'
 import {
-  AmlImageError,
-  AmlUsbError,
-  BulkCmdError,
-  PasswordError,
-  ReacquireNeededError
-} from '../errors'
+  BurnProgress,
+  BurnRun,
+  BurnTimings,
+  closeQuietly,
+  expectProtocol,
+  bootItem as findBootItem,
+  FlashOptions,
+  WipeMode
+} from '../flash/common'
 import { AmlImage, AmlImageItem } from '../image'
 import { DeviceInfo } from '../info'
 import { packUint32sLE, readUint32LE } from '../utils/bytes'
 import { amlsChecksum } from '../utils/checksum'
 import { delay } from '../utils/timeout'
+import { OptimusDevice } from './device'
 import { parsePlatformConfig, Platform } from './platform'
-
-/** disk_initial argument: how much of the device to wipe before flashing */
-export const WipeMode = {
-  None: 0,
-  KeepKeys: 1,
-  ForceKeepKeys: 2,
-  All: 3,
-  ForceAll: 4
-} as const
-export type WipeMode = (typeof WipeMode)[keyof typeof WipeMode]
-
-export type BurnStage =
-  | 'password'
-  | 'erase-bootloader'
-  | 'secure-check'
-  | 'spl'
-  | 'uboot'
-  | 'disk-initial'
-  | 'partition'
-  | 'verify'
-  | 'finish'
-
-export type BurnProgress = {
-  stage: BurnStage
-  partition?: string
-  bytesTransferred?: number
-  totalBytes?: number
-}
-
-/** Delays and timeouts of the burn flow; overridable so tests can zero them. */
-export type BurnTimings = {
-  /** pause between burn steps */
-  stepDelay: number
-  /** wait after sending the unlock password */
-  passwordDelay: number
-  /** pause between the two PLL register writes */
-  regDelay: number
-  /** wait for BL2 to come up after running the SPL */
-  splRunDelay: number
-  /** wait after handing control to U-Boot via the para block */
-  ubootRunDelay: number
-  /** settle time after streaming U-Boot before re-identifying */
-  ubootSettleDelay: number
-  /** disk_initial can erase large eMMC devices */
-  diskInitialTimeout: number
-  /** per-partition sha1 verification runs on the device */
-  verifyTimeout: number
-  /** pause between polls of a Continue:3x busy reply */
-  busyRetryDelay: number
-  /** how long to wait for the device to re-enumerate */
-  reacquireTimeout: number
-}
-
-const DEFAULT_TIMINGS: BurnTimings = {
-  stepDelay: 200,
-  passwordDelay: 2000,
-  regDelay: 500,
-  splRunDelay: 8000,
-  ubootRunDelay: 5000,
-  ubootSettleDelay: 200,
-  diskInitialTimeout: 60_000,
-  verifyTimeout: 150_000,
-  busyRetryDelay: 3000,
-  reacquireTimeout: 10_000
-}
-
-export type FlashOptions = {
-  wipe?: WipeMode
-  /** reboot after flashing rather than powering off on disconnect */
-  reboot?: boolean
-  /** unlock password for locked boards */
-  password?: Uint8Array
-  /** skip the old-bootloader erase step */
-  noEraseBootloader?: boolean
-  onProgress?: (progress: BurnProgress) => void
-  /**
-   * Reopen the device after it re-enumerates mid-flash. Effectively required
-   * for browser apps: the default (reacquireDevice) polls
-   * navigator.usb.getDevices(), but browsers drop the WebUSB grant of
-   * serial-less devices on disconnect, so it throws ReacquireNeededError —
-   * catch it and prompt the user with requestDevice() (needs a user gesture).
-   */
-  reacquire?: () => Promise<Device>
-  timings?: Partial<BurnTimings>
-}
 
 const PARA_MAGIC = 0x7856efab
 /** SPL flows validated with this library; extend after testing a new platform */
 const SUPPORTED_SPL_PLATFORMS = new Set([0x0811])
 
 type BurnContext = {
-  device: Device
+  device: OptimusDevice
   image: AmlImage
   platform: Platform
   secure: boolean
@@ -117,13 +35,7 @@ function progress(ctx: BurnContext, update: BurnProgress) {
 }
 
 function bootItem(ctx: BurnContext, part: 'DDR' | 'UBOOT'): AmlImageItem {
-  const item = ctx.image.itemGet('USB', ctx.secure ? `${part}_ENC` : part)
-  if (!item) {
-    throw new AmlImageError(
-      `the image does not contain any ${ctx.secure ? '' : 'non-'}signed ${part} item`
-    )
-  }
-  return item
+  return findBootItem(ctx.image, ctx.secure, part)
 }
 
 async function checkPassword(ctx: BurnContext) {
@@ -433,71 +345,15 @@ function checkCmd(ctx: BurnContext, command: string, timeout?: number) {
   })
 }
 
-async function closeQuietly(device: Device) {
-  try {
-    await device.close()
-  } catch {
-    // the handle may already be gone after a device-side reset
-  }
-}
-
 /**
- * Poll `navigator.usb.getDevices()` until the re-enumerated device answers
- * identify(). This only succeeds when the browser kept the WebUSB grant across
- * the re-enumeration — a policy grant, or a gadget with a serial number. The
- * WebUSB spec drops the grant of a serial-less device on disconnect, and
- * Amlogic burn-mode gadgets report no serial, so browser apps should expect
- * {@link ReacquireNeededError} and recover by prompting with requestDevice()
- * (which needs a user gesture).
- * @throws ReacquireNeededError when no granted candidate ever appeared (the
- * grant was dropped); a plain timeout error when one appeared but never
- * answered identify()
+ * The complete Optimus burn flow (aml-flash-tool parity).
+ * @returns the device handle that finished the flash
  */
-export async function reacquireDevice(
-  timeout = 10_000,
-  options?: Partial<DeviceOptions>
-): Promise<Device> {
-  if (typeof navigator === 'undefined' || !navigator.usb) {
-    throw new AmlUsbError('cannot reacquire the device: WebUSB is unavailable')
-  }
-
-  const start = Date.now()
-  let seen = false
-  while (Date.now() - start < timeout) {
-    const devices = await navigator.usb.getDevices()
-    const usbDevice = devices.find(
-      (d) => d.vendorId === VENDOR_AMLOGIC && d.productId === PRODUCT_GX_CHIP
-    )
-    if (usbDevice) {
-      seen = true
-      const device = new Device(usbDevice, options)
-      try {
-        await device.initialize()
-        await device.identify()
-        return device
-      } catch {
-        await closeQuietly(device)
-      }
-    }
-    await delay(200)
-  }
-  if (!seen) throw new ReacquireNeededError()
-  throw new AmlUsbError('timed out waiting for the device to re-enumerate')
-}
-
-/**
- * Flash a full Amlogic upgrade package: the complete Optimus burn flow
- * (aml-flash-tool parity). The device re-enumerates mid-flow; pass
- * `options.reacquire` to control how it is reopened.
- * @returns the device handle that finished the flash (it may differ from the
- * one passed in)
- */
-export async function flashImage(
-  device: Device,
-  image: AmlImage,
-  options: FlashOptions = {}
-): Promise<Device> {
-  const timings = { ...DEFAULT_TIMINGS, ...options.timings }
+export async function flashOptimusImage(
+  device: OptimusDevice,
+  run: BurnRun
+): Promise<OptimusDevice> {
+  const { image, options, timings } = run
   const platformItem = image.itemGet('conf', 'platform')
   if (!platformItem) {
     throw new AmlImageError('the image does not contain a platform config')
@@ -506,10 +362,7 @@ export async function flashImage(
 
   const ctx: BurnContext = { device, image, platform, secure: false, timings, options }
   const reacquire = async () => {
-    ctx.device = await (
-      options.reacquire ?? (() => reacquireDevice(timings.reacquireTimeout, device.deviceOptions))
-    )()
-    await delay(timings.stepDelay)
+    ctx.device = expectProtocol(await run.reacquire(), 'optimus')
   }
 
   if (!options.noEraseBootloader) {

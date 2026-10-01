@@ -10,8 +10,9 @@ import {
   SIMPLE_MEMORY_CHUNK,
   TPL_STAT_LEN,
   WRITE_MEDIA_BLOCK_SIZE
-} from './constants'
-import { AmlcError, AmlUsbError, BulkCmdError, MediaWriteError, TplCmdError } from './errors'
+} from '../constants'
+import { BaseDevice, ProgressCallback } from '../devices'
+import { AmlcError, AmlUsbError, BulkCmdError, MediaWriteError, TplCmdError } from '../errors'
 import {
   buildAmlsHeader,
   buildLargeMemoryHeader,
@@ -22,51 +23,17 @@ import {
   splitAddress,
   startsWithAscii,
   trimNulls
-} from './headers'
-import { DeviceInfo } from './info'
-import { consoleLogger, Logger, LogLevel } from './logger'
-import { UsbTransport, WebUsbTransport } from './transport'
-import { asBlob, ImageSource, readBlob } from './utils/blob'
-import { concatBytes, encodeAscii, packUint32sLE, readUint32LE } from './utils/bytes'
-import { amlsChecksum } from './utils/checksum'
-import { delay, timeoutPromise } from './utils/timeout'
-
-export type DeviceOptions = {
-  /** whether to enable additional logging (basic logging is already enabled) */
-  logging: boolean
-  /** the number of milliseconds to time out after */
-  timeout: number
-  /** where to send log output; defaults to the console */
-  logger?: Logger
-}
-
-export type Progress = {
-  bytesTransferred: number
-  totalBytes: number
-}
-
-export type ProgressCallback = (progress: Progress) => void
-
-const DEFAULT_DEVICE_OPTIONS: DeviceOptions = {
-  logging: false,
-  timeout: 5000
-}
+} from '../headers'
+import { DeviceInfo } from '../info'
+import { asBlob, ImageSource, prefetch, readBlob } from '../utils/blob'
+import { concatBytes, encodeAscii, packUint32sLE, readUint32LE } from '../utils/bytes'
+import { amlsChecksum } from '../utils/checksum'
+import { delay, timeoutPromise } from '../utils/timeout'
 
 /** Continue:3x replies mean "busy, poll again after a pause" */
 const BUSY_RETRY_DELAY = 3000
 const MEDIA_ACK_TIMEOUT = 10_000
 const MEDIA_RESEND_DELAY = 200
-
-function isUsbDevice(value: UsbTransport | USBDevice): value is USBDevice {
-  return 'controlTransferIn' in value && typeof value.controlTransferIn === 'function'
-}
-
-/** Start a read early, marking it handled so a transfer error elsewhere cannot
- * surface it as an unhandled rejection; awaiting it still throws. */
-function prefetch<T>(promise: Promise<T>): Promise<T> {
-  promise.catch(() => {})
-  return promise
-}
 
 function toBytes(data: Uint8Array | string): Uint8Array<ArrayBuffer> {
   if (typeof data !== 'string') {
@@ -77,50 +44,8 @@ function toBytes(data: Uint8Array | string): Uint8Array<ArrayBuffer> {
 }
 
 /** An Amlogic SoC in USB boot mode (legacy/Optimus protocol, 1b8e:c003). */
-export class Device {
-  transport: UsbTransport
-  deviceOptions: DeviceOptions
-
-  constructor(transport: UsbTransport | USBDevice, options?: Partial<DeviceOptions>) {
-    this.transport = isUsbDevice(transport) ? new WebUsbTransport(transport) : transport
-    this.deviceOptions = { ...DEFAULT_DEVICE_OPTIONS, ...options }
-  }
-
-  /** The underlying WebUSB device, when connected over WebUSB. */
-  get usbDevice(): USBDevice | undefined {
-    return this.transport instanceof WebUsbTransport ? this.transport.device : undefined
-  }
-
-  _log(level: LogLevel, ...data: unknown[]) {
-    if (level === 'debug' && !this.deviceOptions.logging) return
-    ;(this.deviceOptions.logger ?? consoleLogger)(level, ...data)
-  }
-
-  /** Open and claim the device */
-  async initialize() {
-    try {
-      await this.transport.connect(this.deviceOptions.timeout)
-    } catch (errorMsg) {
-      this._log('debug', errorMsg)
-      throw new AmlUsbError('Unable to open and claim device', { cause: errorMsg })
-    }
-  }
-
-  async close() {
-    try {
-      await this.transport.close(this.deviceOptions.timeout)
-    } catch (error) {
-      throw new AmlUsbError('Unable to close device', { cause: error })
-    }
-  }
-
-  onDisconnect(callback: () => void) {
-    this.transport.onDisconnect(callback)
-  }
-
-  private get timeout() {
-    return this.deviceOptions.timeout
-  }
+export class OptimusDevice extends BaseDevice {
+  readonly protocol = 'optimus'
 
   // ---- ROM primitives (control transfers only) ----
 
@@ -356,36 +281,6 @@ export class Device {
   /** Read a bulk command status reply */
   async bulkCmdStat(timeout?: number): Promise<Uint8Array<ArrayBuffer>> {
     return this.transport.bulkIn(BULK_REPLY_LEN, timeout ?? this.timeout)
-  }
-
-  /**
-   * Poll `read` through `Continue:3x` busy replies (and transient errors)
-   * until a real reply arrives or the deadline passes. The deadline is
-   * checked before each busy pause, so a single busy reply always gets at
-   * least one more poll even when the pause is as long as the timeout.
-   */
-  private async pollThroughBusy(
-    read: () => Promise<Uint8Array<ArrayBuffer>>,
-    busyPrefix: string,
-    timeout: number,
-    busyRetryDelay: number,
-    timeoutMessage: string
-  ): Promise<Uint8Array<ArrayBuffer>> {
-    const deadline = Date.now() + timeout
-    for (;;) {
-      let error: unknown
-      try {
-        const response = await read()
-        if (!startsWithAscii(response, busyPrefix)) return response
-      } catch (e) {
-        error = e
-      }
-      if (Date.now() >= deadline) {
-        if (error instanceof Error) throw error
-        throw new AmlUsbError(timeoutMessage)
-      }
-      if (error === undefined) await delay(busyRetryDelay)
-    }
   }
 
   /**

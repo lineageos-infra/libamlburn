@@ -27,6 +27,12 @@ export class TplCmdError extends CommandError {
   }
 }
 
+export class AdnlCmdError extends CommandError {
+  constructor(command: string, response: string) {
+    super('ADNL', command, response)
+  }
+}
+
 export class MediaWriteError extends AmlUsbError {
   constructor(
     readonly seq: number,
