@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { Request } from '../src/constants'
-import { Device } from '../src/device'
-import { AmlcError, AmlUsbError, BulkCmdError, MediaWriteError, TplCmdError } from '../src/errors'
-import { UsbTransport } from '../src/transport'
-import { amlsChecksum } from '../src/utils/checksum'
+import { Request } from '../../src/constants'
+import {
+  AmlcError,
+  AmlUsbError,
+  BulkCmdError,
+  MediaWriteError,
+  TplCmdError
+} from '../../src/errors'
+import { OptimusDevice } from '../../src/optimus/device'
+import { UsbTransport } from '../../src/transport'
+import { amlsChecksum } from '../../src/utils/checksum'
 
 type ControlOutCall = { request: number; value: number; index: number; data?: Uint8Array }
 type ControlInCall = { request: number; value: number; index: number; length: number }
@@ -63,7 +69,7 @@ function createFakeTransport() {
 
 function createDevice() {
   const fake = createFakeTransport()
-  const device = new Device(fake.transport, { timeout: 100 })
+  const device = new OptimusDevice(fake.transport, { timeout: 100 })
   return { device, ...fake }
 }
 
@@ -303,6 +309,23 @@ describe('bulk commands', () => {
     expect(reply).toBe('bootcmd=run storeboot\nbootdelay=1')
   })
 
+  test('checkBulkCmd passes printenv variables and timeout to readEnv', async () => {
+    const { device, bulkInQueue, controlInQueue, controlsOut } = createDevice()
+
+    bulkInQueue.push(ascii('success', 512))
+    bulkInQueue.push(ascii('success', 512))
+    controlInQueue.push(new Uint8Array(16))
+    bulkInQueue.push(ascii('bootdelay=1\n', 0x2000))
+
+    await expect(device.checkBulkCmd('printenv bootdelay', { timeout: 500 })).resolves.toBe(
+      'bootdelay=1'
+    )
+    const commands = controlsOut
+      .filter((c) => c.request === Request.BULKCMD)
+      .map((c) => new TextDecoder().decode(c.data).replace(/\0+$/, ''))
+    expect(commands[0]).toBe('env export -t 0x1080000 bootdelay')
+  })
+
   test('checkBulkCmd polls through Continue:34 busy replies', async () => {
     const { device, bulkInQueue } = createDevice()
     bulkInQueue.push(ascii('Continue:34', 512), ascii('Continue:34', 512), ascii('success', 512))
@@ -455,6 +478,26 @@ describe('media writes', () => {
     expect(bulkSent[0]).toEqual(data)
   })
 
+  test('writeMedia defaults to seq 0, no retries and a 512-byte ack', async () => {
+    const { device, controlsOut } = createDevice()
+
+    await device.writeMedia(new Uint8Array(4))
+
+    const view = new DataView(controlsOut[0]!.data!.buffer)
+    expect(view.getUint32(0, true)).toBe(0) // retryTimes
+    expect(view.getUint32(8, true)).toBe(0) // seq
+    expect(view.getUint16(18, true)).toBe(0x200) // ackLen
+  })
+
+  test('writeMediaStream works with default options', async () => {
+    const { device, bulkInQueue, bulkSent } = createDevice()
+    bulkInQueue.push(ascii('OK!!', 0x200))
+
+    await device.writeMediaStream(new Uint8Array(16).fill(7))
+
+    expect(bulkSent).toEqual([new Uint8Array(16).fill(7)])
+  })
+
   test('writeMediaStream chunks into 64 KiB blocks with incrementing seq', async () => {
     const { device, controlsOut, bulkSent, bulkInQueue } = createDevice()
     const total = 0x10000 + 100
@@ -496,7 +539,7 @@ describe('media writes', () => {
     const fake = createFakeTransport()
     const boom = new Error('device dropped off the bus')
     fake.transport.bulkOut = () => Promise.reject(boom)
-    const device = new Device(fake.transport, { timeout: 100 })
+    const device = new OptimusDevice(fake.transport, { timeout: 100 })
 
     const error: unknown = await device
       .writeMediaStream(new Uint8Array(64), { resendTimes: 0, resendDelay: 0 })
@@ -509,7 +552,7 @@ describe('media writes', () => {
   test('writeMediaStream logs a failed block write and resends it', async () => {
     const fake = createFakeTransport()
     const logger = vi.fn()
-    const device = new Device(fake.transport, { timeout: 100, logging: true, logger })
+    const device = new OptimusDevice(fake.transport, { timeout: 100, logging: true, logger })
 
     const bulkOut = fake.transport.bulkOut
     let failed = false
@@ -670,7 +713,7 @@ describe('logging', () => {
       expect(log).not.toHaveBeenCalled()
 
       const fake = createFakeTransport()
-      new Device(fake.transport, { timeout: 100, logging: true })._log('debug', 'shown')
+      new OptimusDevice(fake.transport, { timeout: 100, logging: true })._log('debug', 'shown')
       expect(log).toHaveBeenCalledWith('shown')
     } finally {
       info.mockRestore()
@@ -681,7 +724,7 @@ describe('logging', () => {
   test('routes to the provided logger', () => {
     const logger = vi.fn()
     const fake = createFakeTransport()
-    const device = new Device(fake.transport, { timeout: 100, logging: true, logger })
+    const device = new OptimusDevice(fake.transport, { timeout: 100, logging: true, logger })
 
     device._log('debug', 'payload', 42)
 
@@ -693,7 +736,7 @@ describe('connection lifecycle', () => {
   test('initialize wraps a connect failure in AmlUsbError with the cause', async () => {
     const fake = createFakeTransport()
     fake.transport.connect = () => Promise.reject(new Error('boom'))
-    const device = new Device(fake.transport, { timeout: 100 })
+    const device = new OptimusDevice(fake.transport, { timeout: 100 })
 
     const error: unknown = await device.initialize().catch((e: unknown) => e)
 
@@ -705,7 +748,7 @@ describe('connection lifecycle', () => {
     const fake = createFakeTransport()
     const boom = new Error('device already gone')
     fake.transport.close = () => Promise.reject(boom)
-    const device = new Device(fake.transport, { timeout: 100 })
+    const device = new OptimusDevice(fake.transport, { timeout: 100 })
 
     const error: unknown = await device.close().catch((e: unknown) => e)
 
@@ -743,7 +786,7 @@ describe('misc primitives', () => {
 
   test('wraps a raw USBDevice in a WebUsbTransport', () => {
     const usbDevice = { controlTransferIn: () => {} } as unknown as USBDevice
-    const device = new Device(usbDevice)
+    const device = new OptimusDevice(usbDevice)
     expect(device.usbDevice).toBe(usbDevice)
   })
 })
