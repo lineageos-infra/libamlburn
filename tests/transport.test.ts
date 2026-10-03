@@ -88,7 +88,33 @@ describe('WebUsbTransport.connect', () => {
     )
   })
 
-  test('throws when no vendor-class bulk endpoints are found', async () => {
+  test('prefers a vendor-class interface over an earlier one of another class', async () => {
+    const vendor = vendorConfig(1, 0).interfaces[0]!
+    const other = {
+      ...vendorConfig(0, 0).interfaces[0]!,
+      alternates: [{ ...vendor.alternates[0]!, interfaceClass: 0x0a }]
+    }
+    const device = createFakeUsbDevice({ interfaces: [other, vendor] })
+    const transport = new WebUsbTransport(device as unknown as USBDevice)
+
+    await transport.connect(1000)
+
+    expect(device.claimInterface).toHaveBeenCalledWith(1)
+  })
+
+  test('falls back to any interface with a bulk pair (ADNL)', async () => {
+    const config = vendorConfig(0, 0)
+    config.interfaces[0]!.alternates[0]!.interfaceClass = 0x0a
+    const device = createFakeUsbDevice(config)
+    const transport = new WebUsbTransport(device as unknown as USBDevice)
+
+    await transport.connect(1000)
+
+    expect(device.claimInterface).toHaveBeenCalledWith(0)
+    expect(transport.outEndpointNum).toBe(2)
+  })
+
+  test('throws when no bulk endpoint pair is found', async () => {
     const device = createFakeUsbDevice({
       interfaces: [
         {

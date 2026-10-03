@@ -1,11 +1,11 @@
 import { openAsBlob } from 'node:fs'
 import { describe, expect, test, vi } from 'vitest'
 import { Request } from '../../src/constants'
-import { Device } from '../../src/device'
 import { AmlImageError, BulkCmdError, PasswordError } from '../../src/errors'
+import { BurnProgress, BurnTimings, flashImage, WipeMode } from '../../src/flash'
 import { trimNulls } from '../../src/headers'
 import { AmlImage } from '../../src/image'
-import { BurnProgress, BurnTimings, flashImage, WipeMode } from '../../src/optimus'
+import { OptimusDevice } from '../../src/optimus'
 import { UsbTransport } from '../../src/transport'
 import { asciiBytes, buildImage, FixtureItem } from '../fixtures'
 
@@ -189,7 +189,7 @@ describe('flashImage from TPL (device already in U-Boot)', () => {
     })
 
     const stages: BurnProgress[] = []
-    const device = new Device(fake.transport, { timeout: 100 })
+    const device = new OptimusDevice(fake.transport, { timeout: 100 })
     const result = await flashImage(device, image, {
       wipe: WipeMode.All,
       reboot: true,
@@ -261,8 +261,8 @@ describe('flashImage from the BootROM (IPL -> SPL -> AMLC -> reacquire)', () => 
       ]
     })
 
-    const romDevice = new Device(romFake.transport, { timeout: 100 })
-    const tplDevice = new Device(tplFake.transport, { timeout: 100 })
+    const romDevice = new OptimusDevice(romFake.transport, { timeout: 100 })
+    const tplDevice = new OptimusDevice(tplFake.transport, { timeout: 100 })
     const reacquire = vi.fn().mockResolvedValue(tplDevice)
 
     const result = await flashImage(romDevice, image, { timings: ZERO_TIMINGS, reacquire })
@@ -338,8 +338,8 @@ describe('downloadFile respects a size limit smaller than the item', () => {
       ]
     })
 
-    const romDevice = new Device(romFake.transport, { timeout: 100 })
-    const tplDevice = new Device(tplFake.transport, { timeout: 100 })
+    const romDevice = new OptimusDevice(romFake.transport, { timeout: 100 })
+    const tplDevice = new OptimusDevice(tplFake.transport, { timeout: 100 })
     const reacquire = vi.fn().mockResolvedValue(tplDevice)
 
     await flashImage(romDevice, bigImage, { timings: ZERO_TIMINGS, reacquire })
@@ -379,7 +379,7 @@ describe('flashImage with the real install package (TPL start)', () => {
 
     const fake = createBurnTransport({ identifies: [TPL], bulkReplies })
     const progress: BurnProgress[] = []
-    const device = new Device(fake.transport, { timeout: 100 })
+    const device = new OptimusDevice(fake.transport, { timeout: 100 })
     await flashImage(device, image, {
       timings: ZERO_TIMINGS,
       onProgress: (p) => progress.push(p)
@@ -426,7 +426,9 @@ describe('flashImage password handling', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, { timings: ZERO_TIMINGS })
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
+        timings: ZERO_TIMINGS
+      })
     ).rejects.toThrow(PasswordError)
   })
 
@@ -440,7 +442,7 @@ describe('flashImage password handling', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         password: new Uint8Array([1, 2, 3, 4])
       })
@@ -459,7 +461,9 @@ describe('flashImage input validation', () => {
     const fake = createBurnTransport({ identifies: [TPL] })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, { timings: ZERO_TIMINGS })
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
+        timings: ZERO_TIMINGS
+      })
     ).rejects.toThrow(AmlImageError)
   })
 
@@ -476,7 +480,7 @@ describe('flashImage input validation', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         noEraseBootloader: true
       })
@@ -509,8 +513,8 @@ describe('flashImage erase-bootloader paths', () => {
       ]
     })
 
-    const oldDevice = new Device(oldFake.transport, { timeout: 100 })
-    const newDevice = new Device(newFake.transport, { timeout: 100 })
+    const oldDevice = new OptimusDevice(oldFake.transport, { timeout: 100 })
+    const newDevice = new OptimusDevice(newFake.transport, { timeout: 100 })
     const reacquire = vi.fn().mockResolvedValue(newDevice)
 
     const result = await flashImage(oldDevice, image, { timings: ZERO_TIMINGS, reacquire })
@@ -541,7 +545,9 @@ describe('flashImage erase-bootloader paths', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, { timings: ZERO_TIMINGS })
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
+        timings: ZERO_TIMINGS
+      })
     ).rejects.toThrow(BulkCmdError)
   })
 
@@ -554,7 +560,9 @@ describe('flashImage erase-bootloader paths', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, { timings: ZERO_TIMINGS })
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
+        timings: ZERO_TIMINGS
+      })
     ).rejects.toThrow('device dropped off the bus')
   })
 
@@ -565,7 +573,9 @@ describe('flashImage erase-bootloader paths', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, { timings: ZERO_TIMINGS })
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
+        timings: ZERO_TIMINGS
+      })
     ).rejects.toThrow(/invalid power state/)
   })
 
@@ -578,7 +588,9 @@ describe('flashImage erase-bootloader paths', () => {
 
     // Node has no navigator.usb, so the default reacquireDevice throws
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, { timings: ZERO_TIMINGS })
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
+        timings: ZERO_TIMINGS
+      })
     ).rejects.toThrow(/WebUSB is unavailable/)
   })
 })
@@ -591,7 +603,7 @@ describe('flashImage secure-boot detection at IPL', () => {
     const fake = createBurnTransport({ identifies: [IPL] })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         noEraseBootloader: true
       })
@@ -609,7 +621,7 @@ describe('flashImage secure-boot detection at IPL', () => {
       readMemReplies: [new Uint8Array([0, 0, 0, 0])] // encrypt reg -> not secure
     })
 
-    const device = new Device(fake.transport, { timeout: 100 })
+    const device = new OptimusDevice(fake.transport, { timeout: 100 })
     await expect(
       flashImage(device, image, { timings: ZERO_TIMINGS, noEraseBootloader: true })
     ).resolves.toBe(device)
@@ -637,7 +649,7 @@ describe('flashImage secure-boot detection at IPL', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         noEraseBootloader: true
       })
@@ -655,7 +667,7 @@ describe('flashImage secure-boot detection at IPL', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         noEraseBootloader: true
       })
@@ -700,8 +712,8 @@ describe('flashImage AXG/GXL para-block path', () => {
       ]
     })
 
-    const romDevice = new Device(romFake.transport, { timeout: 100 })
-    const tplDevice = new Device(tplFake.transport, { timeout: 100 })
+    const romDevice = new OptimusDevice(romFake.transport, { timeout: 100 })
+    const tplDevice = new OptimusDevice(tplFake.transport, { timeout: 100 })
     const reacquire = vi.fn().mockResolvedValue(tplDevice)
 
     const result = await flashImage(romDevice, image, {
@@ -762,7 +774,7 @@ describe('flashImage AXG/GXL para-block path', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         noEraseBootloader: true
       })
@@ -777,7 +789,7 @@ describe('flashImage AXG/GXL para-block path', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         noEraseBootloader: true
       })
@@ -792,7 +804,7 @@ describe('flashImage AXG/GXL para-block path', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         noEraseBootloader: true
       })
@@ -806,7 +818,7 @@ describe('flashImage AXG/GXL para-block path', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         noEraseBootloader: true
       })
@@ -826,7 +838,7 @@ describe('flashImage AXG/GXL para-block path', () => {
     })
 
     const rejection = expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, {
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
         timings: ZERO_TIMINGS,
         noEraseBootloader: true
       })
@@ -861,7 +873,7 @@ describe('flashImage secure TPL flow', () => {
       failControlCommands: ['burn_complete 3'] // reply lost mid-poweroff (swallowed)
     })
 
-    const device = new Device(fake.transport, { timeout: 100 })
+    const device = new OptimusDevice(fake.transport, { timeout: 100 })
     await expect(flashImage(device, image, { timings: ZERO_TIMINGS })).resolves.toBe(device)
 
     expect(fake.commands).toEqual([
@@ -878,6 +890,46 @@ describe('flashImage secure TPL flow', () => {
     ])
     expect(fake.bulkSent.filter((b) => b.length === 16 && b[0] === 0x22)).toHaveLength(1)
     expect(fake.bulkSent.some((b) => b[0] === 0x11)).toBe(false)
+  })
+
+  test('keeps the plain dtb when meson1_ENC is empty and skips a missing VERIFY item', async () => {
+    const image = await openFixtureImage([
+      { mainType: 'USB', subType: 'UBOOT_ENC', payload: new Uint8Array(64).fill(0xcc) },
+      { mainType: 'dtb', subType: 'meson1', payload: new Uint8Array(24).fill(0x11) },
+      { mainType: 'dtb', subType: 'meson1_ENC', payload: new Uint8Array(0) },
+      { mainType: 'PARTITION', subType: 'boot', verify: 1, payload: new Uint8Array(8).fill(1) }
+    ])
+
+    const fake = createBurnTransport({
+      identifies: [TPL],
+      bulkReplies: [
+        'success', //     low_power (erase-bootloader step)
+        'failed', //      bootloader_is_old -> "new", skip erase
+        'success', //     upload mem (secure check)
+        new Uint8Array([0x10, 0, 0, 0]), // encrypt reg value -> secure boot
+        'success', //     low_power
+        'success', //     disk_initial
+        asciiBytes('OK!!', 0x200), // dtb media ack
+        'success', //     download get_status
+        asciiBytes('OK!!', 0x200), // boot media ack
+        'success', //     download get_status
+        'success', //     save_setting
+        'success' //      burn_complete
+      ]
+    })
+
+    await flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
+      timings: ZERO_TIMINGS
+    })
+
+    expect(fake.commands.slice(6)).toEqual([
+      'download mem dtb normal 24',
+      'download get_status',
+      'download store boot normal 8',
+      'download get_status', // no verify: the image has no VERIFY item for boot
+      'save_setting',
+      'burn_complete 3'
+    ])
   })
 
   test('throws when the device explicitly refuses burn_complete', async () => {
@@ -897,7 +949,9 @@ describe('flashImage secure TPL flow', () => {
     })
 
     await expect(
-      flashImage(new Device(fake.transport, { timeout: 100 }), image, { timings: ZERO_TIMINGS })
+      flashImage(new OptimusDevice(fake.transport, { timeout: 100 }), image, {
+        timings: ZERO_TIMINGS
+      })
     ).rejects.toThrow(BulkCmdError)
   })
 })

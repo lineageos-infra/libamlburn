@@ -6,6 +6,7 @@ import {
   ReacquireNeededError,
   requestDevice,
   WipeMode,
+  type AdnlInfo,
   type BurnProgress,
   type Device,
   type DeviceInfo
@@ -15,7 +16,7 @@ import { computed, ref } from 'vue'
 import ImageItems from './components/ImageItems.vue'
 
 const connectedDevice = ref<Device>()
-const deviceInfo = ref<DeviceInfo>()
+const deviceInfo = ref<DeviceInfo | AdnlInfo>()
 
 const verboseLogging = ref(true)
 const defaultTimeout = ref(15000)
@@ -31,6 +32,7 @@ const rebootAfter = ref(true)
 const flashing = ref(false)
 const burnProgress = ref<BurnProgress>()
 const flashError = ref('')
+const connectError = ref('')
 const reconnectNeeded = ref(false)
 let resolveReconnect: ((device: Device) => void) | undefined
 
@@ -41,11 +43,18 @@ const progressPercent = computed(() => {
 })
 
 async function requestDeviceAccess() {
-  const device = await requestDevice({
-    logging: verboseLogging.value,
-    timeout: defaultTimeout.value
-  })
-  await setupDevice(device)
+  connectError.value = ''
+  try {
+    const device = await requestDevice({
+      logging: verboseLogging.value,
+      timeout: defaultTimeout.value
+    })
+    await setupDevice(device)
+  } catch (error) {
+    // cancelled picker
+    if (error instanceof DOMException && error.name === 'NotFoundError') return
+    connectError.value = String(error)
+  }
 }
 
 async function setupDevice(device: Device) {
@@ -83,7 +92,9 @@ async function refreshInfo() {
 }
 
 async function sendNop() {
-  await connectedDevice.value?.nop()
+  const device = connectedDevice.value
+  if (device?.protocol !== 'optimus') return
+  await device.nop()
   commandLog.value.push('> nop\nok')
 }
 
@@ -93,7 +104,10 @@ async function runCommand() {
   if (!device || !command) return
 
   try {
-    const reply = await device.checkBulkCmd(command)
+    const reply =
+      device.protocol === 'optimus'
+        ? await device.checkBulkCmd(command)
+        : new TextDecoder().decode(await device.request(command)).replace(/\0.*$/s, '')
     commandLog.value.push(`> ${command}\n${reply}`)
   } catch (error) {
     commandLog.value.push(`> ${command}\n${String(error)}`)
@@ -214,6 +228,7 @@ async function flash() {
   </fieldset>
 
   <button @click="requestDeviceAccess">Request device access (WebUSB)</button>
+  <p v-if="connectError" class="error">{{ connectError }}</p>
 
   <section v-if="connectedDevice && deviceInfo">
     <div class="device-info">
@@ -222,11 +237,19 @@ async function flash() {
         <span class="badge">{{ deviceInfo.stageName }}</span>
       </span>
       <button :disabled="flashing" @click="refreshInfo">Refresh</button>
-      <button :disabled="flashing" @click="sendNop">NOP</button>
+      <button v-if="connectedDevice.protocol === 'optimus'" :disabled="flashing" @click="sendNop">
+        NOP
+      </button>
     </div>
 
     <fieldset class="console">
-      <legend>Bulk command console (U-Boot only)</legend>
+      <legend>
+        {{
+          connectedDevice.protocol === 'optimus'
+            ? 'Bulk command console (U-Boot only)'
+            : 'ADNL command console'
+        }}
+      </legend>
       <pre v-if="commandLog.length" class="console-log">{{ commandLog.join('\n') }}</pre>
       <form class="console-input" @submit.prevent="runCommand">
         <input v-model="commandInput" type="text" placeholder="printenv" />

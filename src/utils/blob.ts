@@ -13,3 +13,10 @@ export async function readBlob(
 ): Promise<Uint8Array<ArrayBuffer>> {
   return new Uint8Array(await blob.slice(offset, offset + length).arrayBuffer())
 }
+
+/** Start a read early, marking it handled so a transfer error elsewhere cannot
+ * surface it as an unhandled rejection; awaiting it still throws. */
+export function prefetch<T>(promise: Promise<T>): Promise<T> {
+  promise.catch(() => {})
+  return promise
+}

@@ -1,9 +1,11 @@
 export const VENDOR_AMLOGIC = 0x1b8e
 export const PRODUCT_GX_CHIP = 0xc003
-// ADNL-protocol devices (bulk-only, unsupported) enumerate as 0x1b8e:0xc004
+/** ADNL-protocol devices (bulk-only; A1, C1, C2, SC2, S4, T5, T5D, T7) */
+export const PRODUCT_ADNL = 0xc004
 
 export const DeviceFilters: USBDeviceFilter[] = [
-  { vendorId: VENDOR_AMLOGIC, productId: PRODUCT_GX_CHIP }
+  { vendorId: VENDOR_AMLOGIC, productId: PRODUCT_GX_CHIP },
+  { vendorId: VENDOR_AMLOGIC, productId: PRODUCT_ADNL }
 ]
 
 /** Vendor control request codes (bRequest) */
@@ -50,3 +52,19 @@ export const DEFAULT_ACK_LEN = 0x200
 export const CHECKSUM_ALG_NONE = 0x00ee
 export const CHECKSUM_ALG_ADDSUM = 0x00ef
 export const CHECKSUM_ALG_CRC32 = 0x00f0
+
+/** ADNL replies are read in one packet of up to this many bytes */
+export const ADNL_READ_LEN = 512
+/** ADNL data is written in bulk transfers of at most this many bytes */
+export const ADNL_BULK_SIZE = 16384
+
+/** `setvar:burnsteps` values sent to the BootROM and BL2 */
+export const AdnlBurnSteps = {
+  ROM_0: 0xc0040000,
+  ROM_1: 0xc0040001,
+  ROM_2: 0xc0040002,
+  BL2: 0xc0040003,
+  TPL_0: 0xc0041030,
+  TPL_1: 0xc0041031,
+  TPL_2: 0xc0041032
+} as const
